@@ -146,8 +146,11 @@ class PasswordType(ScalarCoercible, types.TypeDecorator):
     """
 
     impl = types.VARBINARY(1024)
-    python_type = Password
     cache_ok = True
+
+    @property
+    def python_type(self):
+        return self.impl.type.python_type
 
     def __init__(self, max_length=None, **kwargs):
         # Fail if passlib is not found.
@@ -250,10 +253,6 @@ class PasswordType(ScalarCoercible, types.TypeDecorator):
                 value.secret = None
 
         return value
-
-    @property
-    def python_type(self):
-        return self.impl.type.python_type
 
 
 Password.associate_with(PasswordType)
