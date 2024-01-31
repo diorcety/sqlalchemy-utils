@@ -7,9 +7,11 @@ else:
     from importlib_metadata import metadata
 
 
-def get_sqlalchemy_version(version=metadata("sqlalchemy")["Version"]):
+def get_sqlalchemy_version(version=None):
     """Extract the sqlalchemy version as a tuple of integers."""
 
+    if version is None:
+        version = metadata("sqlalchemy")["Version"]
     match = re.search(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?", version)
     try:
         return tuple(int(v) for v in match.groups() if v is not None)

@@ -53,7 +53,7 @@ def _expect_successful_update(obj, field, value, reraise_exc):
     except (reraise_exc) as e:
         session = sa.orm.object_session(obj)
         session.rollback()
-        assert False, str(e)
+        raise AssertionError(str(e))
 
 
 def _expect_failing_update(obj, field, value, expected_exc):

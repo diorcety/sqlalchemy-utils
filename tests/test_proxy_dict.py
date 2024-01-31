@@ -71,8 +71,7 @@ class TestProxyDict:
         )
         session.add(article)
         session.commit()
-        article.translations['en']
-        article.translations['en']
+        assert article.translations['en'] is article.translations['en']
 
     def test_set_updates_cache(self, session, Article, ArticleTranslation):
         article = Article()
@@ -96,9 +95,9 @@ class TestProxyDict:
         session.commit()
         article.id
         query_count = connection.query_count
-        'en' in article.translations
-        'en' in article.translations
-        'en' in article.translations
+        assert 'en' not in article.translations
+        assert 'en' not in article.translations
+        assert 'en' not in article.translations
         assert connection.query_count == query_count + 1
 
     def test_getitem_with_none_value_in_cache(self, session, Article):
@@ -106,7 +105,7 @@ class TestProxyDict:
         session.add(article)
         session.commit()
         article.id
-        'en' in article.translations
+        'en' in article.translations  # noqa: B015
         assert article.translations['en']
 
     def test_contains(self, Article):

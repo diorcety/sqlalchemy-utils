@@ -315,7 +315,7 @@ def get_driver_connection(connection):
 
 
 def before_create(target, connection, **kw):
-    for name, composite in registered_composites.items():
+    for composite in registered_composites.values():
         composite.create(connection, checkfirst=True)
         register_psycopg2_composite(
             get_driver_connection(connection),
@@ -324,12 +324,12 @@ def before_create(target, connection, **kw):
 
 
 def after_drop(target, connection, **kw):
-    for name, composite in registered_composites.items():
+    for composite in registered_composites.values():
         composite.drop(connection, checkfirst=True)
 
 
 def register_composites(connection):
-    for name, composite in registered_composites.items():
+    for composite in registered_composites.values():
         register_psycopg2_composite(
             get_driver_connection(connection),
             composite

@@ -64,7 +64,7 @@ class TestAttrPath:
         assert str(path.path) == 'sections.subsections'
 
     def test_len(self, SubSection):
-        len(AttrPath(SubSection, 'section.document')) == 2
+        assert len(AttrPath(SubSection, 'section.document')) == 2
 
     def test_init(self, SubSection):
         path = AttrPath(SubSection, 'section.document')

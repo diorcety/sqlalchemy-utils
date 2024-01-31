@@ -56,7 +56,7 @@ class ArrowType(EnrichedDateTimeType):
             )
 
         super().__init__(
-            datetime_processor=ArrowDateTime,
             *args,
+            datetime_processor=ArrowDateTime,
             **kwargs
         )
