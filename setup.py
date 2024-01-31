@@ -35,8 +35,6 @@ extras_require = {
         'python-dateutil>=2.6',
         'backports.zoneinfo;python_version<"3.9"',
         'pymysql',
-        'flake8>=2.4.0',
-        'isort>=4.2.2',
         'pyodbc',
     ],
     'babel': ['Babel>=1.3'],

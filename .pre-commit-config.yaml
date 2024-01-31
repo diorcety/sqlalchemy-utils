@@ -25,12 +25,6 @@ repos:
     hooks:
       - id: isort
 
-      # Allow tox to run isort as a linter.
-      - id: isort
-        alias: isort-check
-        args: [--check]
-        stages: [manual]
-
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.15.0
     hooks:
