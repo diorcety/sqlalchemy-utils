@@ -7,9 +7,10 @@ from sqlalchemy_utils.functions import get_columns
 
 
 class CreateView(DDLElement):
-    def __init__(self, name, selectable, materialized=False, replace=False):
+    def __init__(self, table, name, selectable, materialized=False, replace=False):
         if materialized and replace:
             raise ValueError("Cannot use CREATE OR REPLACE with materialized views")
+        self.table = table
         self.name = name
         self.selectable = selectable
         self.materialized = materialized
@@ -18,10 +19,22 @@ class CreateView(DDLElement):
 
 @compiler.compiles(CreateView)
 def compile_create_materialized_view(element, compiler, **kw):
-    return 'CREATE {}{}VIEW {} AS {}'.format(
+    withclause = element.table.dialect_options.get("postgresql", {}).get("with", {})
+    withclause_text = ''
+    if withclause:
+        withclause_text += " WITH (%s)" % (
+            ", ".join(
+                [
+                    "%s = %s" % storage_parameter
+                    for storage_parameter in withclause.items()
+                ]
+            )
+        )
+    return 'CREATE {}{}VIEW {}{} AS {}'.format(
         'OR REPLACE ' if element.replace else '',
         'MATERIALIZED ' if element.materialized else '',
         compiler.dialect.identifier_preparer.quote(element.name),
+        withclause_text,
         compiler.sql_compiler.process(element.selectable, literal_binds=True),
     )
 
@@ -79,7 +92,8 @@ def create_materialized_view(
     selectable,
     metadata,
     indexes=None,
-    aliases=None
+    aliases=None,
+    **kwargs
 ):
     """ Create a view on a given metadata
 
@@ -102,13 +116,14 @@ def create_materialized_view(
         selectable=selectable,
         indexes=indexes,
         metadata=None,
-        aliases=aliases
+        aliases=aliases,
+        **kwargs
     )
 
     sa.event.listen(
         metadata,
         'after_create',
-        CreateView(name, selectable, materialized=True)
+        CreateView(table, name, selectable, materialized=True)
     )
 
     @sa.event.listens_for(metadata, 'after_create')
@@ -130,6 +145,7 @@ def create_view(
     metadata,
     cascade_on_drop=True,
     replace=False,
+    **kwargs
 ):
     """ Create a view on a given metadata
 
@@ -170,13 +186,14 @@ def create_view(
     table = create_table_from_selectable(
         name=name,
         selectable=selectable,
-        metadata=None
+        metadata=None,
+        **kwargs
     )
 
     sa.event.listen(
         metadata,
         'after_create',
-        CreateView(name, selectable, replace=replace),
+        CreateView(table, name, selectable, replace=replace),
     )
 
     @sa.event.listens_for(metadata, 'after_create')
