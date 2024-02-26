@@ -1,25 +1,146 @@
 import sqlalchemy as sa
+from sqlalchemy import inspection
 from sqlalchemy.ext import compiler
+from sqlalchemy.sql.base import DialectKWArgs
 from sqlalchemy.schema import DDLElement, PrimaryKeyConstraint
 from sqlalchemy.sql.expression import ClauseElement, Executable
+from sqlalchemy.sql.schema import _CreateDropBind, HasSchemaAttr, Table, _get_table_key
+from sqlalchemy.sql.ddl import _CreateBase, _DropBase, SchemaGenerator, SchemaDropper
 
 from sqlalchemy_utils.functions import get_columns
 
+class View(Table, inspection.Inspectable["View"]):
+    __visit_name__ = "table"  # Behave as table when not used for create/drop view
 
-class CreateView(DDLElement):
-    def __init__(self, table, name, selectable, materialized=False, replace=False):
+    def __init__(self,  name, metadata, selectable, materialized=False, replace=False, *args, **kwargs):
+        super().__init__(name, metadata, *args, **kwargs)
         if materialized and replace:
             raise ValueError("Cannot use CREATE OR REPLACE with materialized views")
-        self.table = table
-        self.name = name
-        self.selectable = selectable
-        self.materialized = materialized
-        self.replace = replace
+        self._selectable = selectable
+        self._materialized = materialized
+        self._replace = replace
+
+    
+    @property
+    def selectable(self):
+        return self._selectable
+
+    @selectable.setter
+    def selectable(self, value):
+        self._selectable = value
+
+    @property
+    def materialized(self):
+        return self._materialized
+
+    @materialized.setter
+    def materialized(self, value):
+        self._materialized = value
+
+    @property
+    def replace(self):
+        return self._replace
+
+    @replace.setter
+    def replace(self, value):
+        self._replace = value
+
+    def create_view(self, bind: _CreateDropBind, checkfirst: bool = False) -> None:
+        """Issue a ``CREATE`` statement for this
+        :class:`.Index`, using the given
+        :class:`.Connection` or :class:`.Engine`` for connectivity.
+
+        .. seealso::
+
+            :meth:`_schema.MetaData.create_all`.
+
+        """
+        View.__visit_name__ = 'view'
+        try:
+            bind._run_ddl_visitor(ExtSchemaGenerator, self, checkfirst=checkfirst)
+        finally:
+            View.__visit_name__ = 'table'
+
+    def drop_view(self, bind: _CreateDropBind, checkfirst: bool = False) -> None:
+        """Issue a ``DROP`` statement for this
+        :class:`.Index`, using the given
+        :class:`.Connection` or :class:`.Engine` for connectivity.
+
+        .. seealso::
+
+            :meth:`_schema.MetaData.drop_all`.
+
+        """
+        View.__visit_name__ = 'view'
+        try:
+            bind._run_ddl_visitor(ExtSchemaDropper, self, checkfirst=checkfirst)
+        finally:
+            View.__visit_name__ = 'table'
+
+    def __repr__(self) -> str:
+        return "View(%s)" % ", ".join(
+            [repr(self.name)]
+            + [repr(self.metadata)]
+            + [repr(x) for x in self.columns]
+            + ["%s=%s" % (k, repr(getattr(self, k))) for k in ["schema"]]
+        )
+
+    def __str__(self) -> str:
+        return _get_table_key(self.description, self.schema)
+
+class CreateView(_CreateBase):
+    """Represent a CREATE VIEW statement."""
+
+    __visit_name__ = "create_view"
+
+    def __init__(self, element, if_not_exists=False):
+        """Create a :class:`.CreateView` construct.
+
+        :param element: a :class:`_schema.View` that's the subject
+         of the CREATE.
+        :param if_not_exists: if True, an IF NOT EXISTS operator will be
+         applied to the construct.
+
+         .. versionadded:: 1.4.0b2
+
+        """
+        super().__init__(element, if_not_exists=if_not_exists)
+
+
+class DropView(_DropBase):
+    """Represent a DROP VIEW statement."""
+
+    __visit_name__ = "drop_view"
+
+    def __init__(self, element, if_exists=False):
+        """Create a :class:`.DropView` construct.
+
+        :param element: a :class:`_schema.View` that's the subject
+         of the DROP.
+        :param if_exists: if True, an IF EXISTS operator will be applied to the
+         construct.
+
+         .. versionadded:: 1.4.0b2
+
+        """
+        super().__init__(element, if_exists=if_exists)
+
+
+class ExtSchemaGenerator(SchemaGenerator):
+    def visit_view(self, view, create_ok=False):
+        with self.with_ddl_events(view):
+            CreateView(view)._invoke_with(self.connection)
+
+class ExtSchemaDropper(SchemaDropper):
+    def visit_view(self, view, drop_ok=False):
+        with self.with_ddl_events(view):
+            DropView(view)(view, self.connection)
 
 
 @compiler.compiles(CreateView)
-def compile_create_materialized_view(element, compiler, **kw):
-    withclause = element.table.dialect_options.get("postgresql", {}).get("with", {})
+def compile_create_materialized_view(create, compiler, **kw):
+    element = create.element
+    withclause = element.dialect_options.get("postgresql", {}).get("with", {})
     withclause_text = ''
     if withclause:
         withclause_text += " WITH (%s)" % (
@@ -39,15 +160,9 @@ def compile_create_materialized_view(element, compiler, **kw):
     )
 
 
-class DropView(DDLElement):
-    def __init__(self, name, materialized=False, cascade=True):
-        self.name = name
-        self.materialized = materialized
-        self.cascade = cascade
-
-
 @compiler.compiles(DropView)
-def compile_drop_materialized_view(element, compiler, **kw):
+def compile_drop_materialized_view(create, compiler, **kw):
+    element = create.element
     return 'DROP {}VIEW IF EXISTS {} {}'.format(
         'MATERIALIZED ' if element.materialized else '',
         compiler.dialect.identifier_preparer.quote(element.name),
@@ -55,12 +170,14 @@ def compile_drop_materialized_view(element, compiler, **kw):
     )
 
 
-def create_table_from_selectable(
+def create_view_from_selectable(
     name,
     selectable,
     indexes=None,
     metadata=None,
     aliases=None,
+    materialized=False,
+    replace=False,
     **kwargs
 ):
     if indexes is None:
@@ -78,13 +195,13 @@ def create_table_from_selectable(
         )
         for c in get_columns(selectable)
     ] + indexes
-    table = sa.Table(name, metadata, *args, **kwargs)
+    view = View(name, metadata, selectable, materialized, replace, *args, **kwargs)
 
     if not any([c.primary_key for c in get_columns(selectable)]):
-        table.append_constraint(
+        view.append_constraint(
             PrimaryKeyConstraint(*[c.name for c in get_columns(selectable)])
         )
-    return table
+    return view
 
 
 def create_materialized_view(
@@ -111,32 +228,31 @@ def create_materialized_view(
     statement is emitted instead of a ``CREATE VIEW``.
 
     """
-    table = create_table_from_selectable(
+    view = create_view_from_selectable(
         name=name,
         selectable=selectable,
         indexes=indexes,
         metadata=None,
         aliases=aliases,
+        materialized=True,
+        replace=False,
         **kwargs
     )
 
-    sa.event.listen(
-        metadata,
-        'after_create',
-        CreateView(table, name, selectable, materialized=True)
-    )
+    @sa.event.listens_for(metadata, 'after_create')
+    def create_view(target, connection, **kw):
+        view.create_view(connection)
 
     @sa.event.listens_for(metadata, 'after_create')
     def create_indexes(target, connection, **kw):
-        for idx in table.indexes:
+        for idx in view.indexes:
             idx.create(connection)
 
-    sa.event.listen(
-        metadata,
-        'before_drop',
-        DropView(name, materialized=True)
-    )
-    return table
+    @sa.event.listens_for(metadata, 'before_drop')
+    def drop_view(target, connection, **kw):
+        view.drop_view(connection)
+
+    return view
 
 
 def create_view(
@@ -183,30 +299,28 @@ def create_view(
         metadata.create_all(engine) # View is created at this point
 
     """
-    table = create_table_from_selectable(
+    view = create_view_from_selectable(
         name=name,
         selectable=selectable,
         metadata=None,
+        replace=replace,
         **kwargs
     )
 
-    sa.event.listen(
-        metadata,
-        'after_create',
-        CreateView(table, name, selectable, replace=replace),
-    )
+    @sa.event.listens_for(metadata, 'after_create')
+    def create_view(target, connection, **kw):
+        view.create_view(connection)
 
     @sa.event.listens_for(metadata, 'after_create')
     def create_indexes(target, connection, **kw):
-        for idx in table.indexes:
+        for idx in view.indexes:
             idx.create(connection)
 
-    sa.event.listen(
-        metadata,
-        'before_drop',
-        DropView(name, cascade=cascade_on_drop)
-    )
-    return table
+    @sa.event.listens_for(metadata, 'before_drop')
+    def drop_view(target, connection, **kw):
+        view.drop_view(connection)
+
+    return view
 
 
 class RefreshMaterializedView(Executable, ClauseElement):
